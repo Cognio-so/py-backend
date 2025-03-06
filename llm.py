@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Debug: Print API keys loading status
+# Debug: Print API keys
 logger.info("API Keys loaded successfully")
 
 # Configure Gemini AI
@@ -49,20 +49,18 @@ def get_or_create_memory(session_id):
     return conversation_memories[session_id]
 
 def get_model_instance(model_name):
-    """Map model names to their respective client instances."""
     if model_name == "gemini-1.5-flash":
         return genai.GenerativeModel('gemini-1.5-flash')
     elif model_name == "gpt-4o-mini":
         return openai_client
     elif model_name == "claude-3-haiku-20240307":
         return claude_client
-    elif model_name == "accounts/fireworks/models/llama-v3p1-8b-instruct":
+    elif model_name == "llama-v3-7b":  # Updated model name
         return fireworks
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
 async def generate_response(messages, model_name, session_id=None):
-    """Generate a response based on the model and messages."""
     try:
         logger.info(f"Generating response with model: {model_name}, session_id: {session_id}")
         model = get_model_instance(model_name)
@@ -77,7 +75,7 @@ async def generate_response(messages, model_name, session_id=None):
         buffer = ""
         MIN_CHUNK_SIZE = 50
         PUNCTUATION_MARKS = ['.', '!', '?', '\n']
-
+        
         if model_name == "gemini-1.5-flash":
             prompt = f"You must respond in {language}. Maintain the same language throughout the response. "
             if 'hi' in language.lower():
@@ -129,23 +127,26 @@ async def generate_response(messages, model_name, session_id=None):
             )
             
             async for chunk in response:
+                # Handle different event types from Anthropic streaming
                 if chunk.type == "content_block_delta" and hasattr(chunk.delta, 'text'):
                     buffer += chunk.delta.text
                     if any(buffer.endswith(p) for p in PUNCTUATION_MARKS) and len(buffer.strip()) >= MIN_CHUNK_SIZE:
                         yield buffer
                         buffer = ""
                 elif chunk.type == "message_delta" or chunk.type == "message_stop":
+                    # End of message, yield remaining buffer if any
                     if buffer.strip():
                         yield buffer
                         buffer = ""
 
-        elif model_name == "accounts/fireworks/models/llama-v3p1-8b-instruct":
+        elif model_name == "llama-v3-7b":
             response = model.ChatCompletion.create(
-                model="accounts/fireworks/models/llama-v3p1-8b-instruct",
+                model="accounts/fireworks/models/llama-v3p1-8b-instruct",  # Updated model ID
                 messages=messages,
                 stream=True
             )
             
+            # Handle non-async streaming for Fireworks
             for chunk in response:
                 if hasattr(chunk.choices[0], 'delta') and chunk.choices[0].delta.content:
                     buffer += chunk.choices[0].delta.content
@@ -163,29 +164,34 @@ async def generate_response(messages, model_name, session_id=None):
         yield f"I apologize, but I encountered an error: {str(e)}"
 
 async def generate_related_questions(message: str, model_name: str) -> list:
-    """Generate related follow-up questions based on the input message."""
     try:
         model = get_model_instance(model_name)
         prompt = f"Based on this message: '{message}', generate 3 related follow-up questions. Return them as a simple array of strings."
         
-        if model_name == "gemini-1.5-flash":
+        if model_name.startswith("gemini"):
             response = model.generate_content(prompt)
             text_response = response.text
-        elif model_name == "gpt-4o-mini":
+        elif model_name.startswith("gpt"):
             response = await model.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}]
             )
             text_response = response.choices[0].message.content
-        elif model_name == "claude-3-haiku-20240307":
+        elif model_name.startswith("claude"):
             response = await model.messages.create(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1000
             )
             text_response = response.content[0].text
-        elif model_name == "accounts/fireworks/models/llama-v3p1-8b-instruct":
+        elif model_name.startswith("fireworks"):
             response = model.ChatCompletion.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            text_response = response.choices[0].message.content
+        elif model_name.startswith("groq"):
+            response = model.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}]
             )
