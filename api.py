@@ -43,17 +43,13 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure CORS
+# Configure CORS - updated to be more permissive for debugging
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://smith-frontend.vercel.app",  # Add your frontend domain
-        "http://localhost:5000",  # For local development
-        "http://localhost:5173",  # For Vite dev server
-    ],
+    allow_origins=["*"],  # Allow all origins for testing
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
     expose_headers=["*"],
 )
 
@@ -76,6 +72,20 @@ async def get_session_id(request: Request):
         sessions[session_id]['last_accessed'] = time.time()
     
     return session_id
+
+# Add CORS options endpoint for preflight requests
+@app.options("/{rest_of_path:path}")
+async def options_route(rest_of_path: str):
+    return JSONResponse(
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Max-Age": "86400",
+        }
+    )
 
 @app.post("/chat")
 async def chat_endpoint(request: Request, session_id: str = Depends(get_session_id)):
@@ -105,7 +115,18 @@ async def chat_endpoint(request: Request, session_id: str = Depends(get_session_
                 yield f"data: {text}\n\n"
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(generate(), media_type="text/event-stream")
+        return StreamingResponse(
+            generate(), 
+            media_type="text/event-stream",
+            headers={
+                "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
+                "Access-Control-Allow-Credentials": "true",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream",
+                "X-Accel-Buffering": "no"
+            }
+        )
     except Exception as e:
         logger.error(f"Chat endpoint error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -118,72 +139,17 @@ async def agent_chat_endpoint(request: Request, session_id: str = Depends(get_se
         
         body = await request.json()
         message = body.get('message', '').strip()
+        model = body.get('model', 'gemini-1.5-flash').strip()
+        request_id = request.headers.get('X-Request-ID')
+
+        sessions[session_id]['current_request'] = request_id
+        sessions[session_id]['cancelled'] = False
         
         if not message:
             raise HTTPException(status_code=400, detail="No message provided")
         
         logger.info(f"Agent chat request from session {session_id}: {message[:50]}...")
         
-        # Format the message for the agent
-        formatted_message = [("user", message)]
-        
-        # Setup agent response streaming
-        async def response_generator():
-            try:
-                # Call the React agent
-                result = await graph.ainvoke(
-                    {"messages": formatted_message},
-                    {"configurable": {"system_prompt": "You are a helpful AI assistant."}}
-                )
-                
-                # Get the final AI message
-                final_message = result["messages"][-1]
-                if hasattr(final_message, "content"):
-                    content = final_message.content
-                    if isinstance(content, str):
-                        yield f"data: {json.dumps({'content': content})}\n\n"
-                    else:
-                        yield f"data: {json.dumps({'content': str(content)})}\n\n"
-                
-                yield "data: [DONE]\n\n"
-            except Exception as e:
-                logger.error(f"Agent error: {str(e)}")
-                yield f"data: Error: {str(e)}\n\n"
-                yield "data: [DONE]\n\n"
-        
-        return StreamingResponse(
-            response_generator(),
-            media_type='text/event-stream',
-            headers={
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'Content-Type': 'text/event-stream',
-                'X-Accel-Buffering': 'no'
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"Agent chat error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    try:
-        # Cancel previous request if header is present
-        if request.headers.get('X-Cancel-Previous') == 'true':
-            previous_request = sessions[session_id].get('current_request')
-            if previous_request:
-                sessions[session_id]['cancelled'] = True
-
-        body = await request.json()
-        message = body.get('message', '').strip()
-        model = body.get('model', 'gemini-1.5-flash').strip()
-        request_id = request.headers.get('X-Request-ID')
-
-        sessions[session_id]['current_request'] = request_id
-        sessions[session_id]['cancelled'] = False
-
-        if not message:
-            raise HTTPException(status_code=400, detail="No message provided")
-
         # Stream the response from React Agent
         async def generate():
             try:
@@ -254,7 +220,15 @@ async def agent_chat_endpoint(request: Request, session_id: str = Depends(get_se
 
         return StreamingResponse(
             generate(),
-            media_type="text/event-stream"
+            media_type="text/event-stream",
+            headers={
+                "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
+                "Access-Control-Allow-Credentials": "true",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream",
+                "X-Accel-Buffering": "no"
+            }
         )
 
     except Exception as e:
@@ -274,14 +248,31 @@ async def related_questions_endpoint(request: Request):
         # Generate related questions
         questions = await generate_related_questions(message, model)
 
-        return JSONResponse({
-            "success": True,
-            "questions": questions
-        })
+        return JSONResponse(
+            content={
+                "success": True,
+                "questions": questions
+            },
+            headers={
+                "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
+                "Access-Control-Allow-Credentials": "true",
+            }
+        )
 
     except Exception as e:
         logger.error(f"Related questions error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return JSONResponse(
+        content={"status": "healthy"},
+        headers={
+            "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn
