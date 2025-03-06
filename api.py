@@ -46,10 +46,15 @@ logger = logging.getLogger(__name__)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://smith-frontend.vercel.app",  # Add your frontend domain
+        "http://localhost:5000",  # For local development
+        "http://localhost:5173",  # For Vite dev server
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Add session management
