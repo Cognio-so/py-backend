@@ -1,51 +1,25 @@
 name = "py-backend"
 compatibility_date = "2024-01-01"
-compatibility_flags = ["nodejs_compat"]
 
-# Configure your account ID (already set)
-account_id = "7a1ee5c85f806b8611bceb0195d44a6c"
-
-# Routes - simplified to match your API structure
-routes = [
-  "https://py-backend.pages.dev/*"
-]
+# This is a required field for Pages projects
+pages_build_output_dir = "."
 
 # Environment variables
 [vars]
 ALLOWED_ORIGIN = "https://smith-frontend.vercel.app"
 
-# Production environment configuration
-[env.production]
-name = "py-backend"
-workers_dev = true
-vars = { ENVIRONMENT = "production" }
-
-# Set up explicit routes for API endpoints
-[[env.production.routes]]
-pattern = "/chat"
-script = "api.py"
-
-[[env.production.routes]]
-pattern = "/agent-chat"
-script = "api.py"
-
-[[env.production.routes]]
-pattern = "/related-questions"
-script = "api.py"
-
-[[env.production.routes]]
-pattern = "/health"
-script = "api.py"
-
-# Build configuration - ensure all dependencies are installed
+# Build configuration
 [build]
 command = "pip install -r requirements.txt"
 
-# Configure site assets
+# Functions configuration
+[functions]
+directory = "functions"
+
+# Routes configuration
+[routes]
+pattern = "/api/*"
+script = "api.py"
+
 [site]
 bucket = "./"
-pages_build_output_dir = "."
-
-# Worker configuration
-[build.upload]
-format = "service-worker"
