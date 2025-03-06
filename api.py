@@ -83,127 +83,27 @@ async def chat_endpoint(request: Request, session_id: str = Depends(get_session_
 
         body = await request.json()
         message = body.get('message', '').strip()
-        model = body.get('model', 'gemini-1.5-flash').strip()
+        model = body.get('model', 'gemini-1.5-flash').strip()  # Use full model ID directly
 
-        # Map model names to their backend versions
-        model_mapping = {
-            'gpt-4o-mini': 'gpt-4o-mini',
-            'gemini-1.5-flash': 'gemini-1.5-flash',
-            'claude-3-haiku-20240307': 'claude-3-haiku-20240307',
-            'llama-v3-7b': 'llama-v3-7b',
-        }
-
-        model = model_mapping.get(model, model)  # Get the mapped model, or the original if not found
         request_id = request.headers.get('X-Request-ID')
-
         sessions[session_id]['current_request'] = request_id
         sessions[session_id]['cancelled'] = False
 
         if not message:
             raise HTTPException(status_code=400, detail="No message provided")
 
-        # Prepare messages for the model
-        messages = [
-            {"role": "user", "content": message}
-        ]
-
-        # Stream the response
+        messages = [{"role": "user", "content": message}]
         async def generate():
-            try:
-                async for text in generate_response(messages, model, session_id):
-                    if sessions[session_id].get('cancelled', False):
-                        break
-                    # Format the response as a proper SSE data chunk
-                    yield f"data: {text}\n\n"
-                yield "data: [DONE]\n\n"
-            except Exception as e:
-                logger.error(f"Error in generate: {str(e)}")
-                yield f"data: Error: {str(e)}\n\n"
+            async for text in generate_response(messages, model, session_id):
+                if sessions[session_id].get('cancelled', False):
+                    break
+                yield f"data: {text}\n\n"
+            yield "data: [DONE]\n\n"
 
-        return StreamingResponse(
-            generate(),
-            media_type="text/event-stream"
-        )
-
+        return StreamingResponse(generate(), media_type="text/event-stream")
     except Exception as e:
         logger.error(f"Chat endpoint error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/voice-chat")
-async def voice_chat_endpoint(request: Request, session_id: str = Depends(get_session_id)):
-    try:
-        logger.info(f"Received voice chat request for session {session_id}")
-        
-        # Update session last accessed time
-        sessions[session_id]['last_accessed'] = time.time()
-        
-        body = await request.json()
-        message = body.get('message', '').strip()
-        model = body.get('model', 'gemini-pro').strip()
-        language = body.get('language', 'en-US').strip()
-        request_id = request.headers.get('X-Request-ID')
-
-        logger.info(f"Processing voice request {request_id} with message: {message[:50]}...")
-
-        if not message:
-            logger.warning("Empty message received")
-            return JSONResponse({
-                "success": False,
-                "detail": "No message provided"
-            }, status_code=400)
-
-        # Store the current request ID in the session
-        previous_request = sessions[session_id].get('current_request')
-        sessions[session_id]['current_request'] = request_id
-        logger.info(f"Updated session request ID from {previous_request} to {request_id}")
-
-        # Enhanced system prompt for multilingual support
-        system_prompt = (
-            f"You are a helpful assistant. Respond in {language}. "
-            f"If the user speaks in Hindi, respond in Hindi. "
-            f"If they speak in English, respond in English. "
-            f"Maintain the same language and style as the user's input. "
-            f"Keep responses natural and conversational in the detected language."
-        )
-
-        # Prepare messages for the model
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message}
-        ]
-
-        try:
-            response = ""
-            async for chunk in generate_response(messages, model, session_id):
-                # Check if the request is still valid
-                if sessions[session_id].get('current_request') != request_id:
-                    logger.warning(f"Request {request_id} was superseded")
-                    raise HTTPException(status_code=409, detail="Request superseded")
-                response += chunk
-
-            if not response:
-                raise ValueError("No response generated")
-
-            logger.info(f"Successfully generated response for voice request {request_id}")
-            return JSONResponse({
-                "success": True,
-                "response": response,
-                "language": language
-            })
-
-        except Exception as e:
-            logger.error(f"Model error: {str(e)}")
-            return JSONResponse({
-                "success": False,
-                "detail": f"Model error: {str(e)}"
-            }, status_code=500)
-
-    except Exception as e:
-        logger.error(f"Voice chat error: {str(e)}")
-        return JSONResponse({
-            "success": False,
-            "detail": str(e)
-        }, status_code=500)
 
 @app.post("/agent-chat")
 async def agent_chat_endpoint(request: Request, session_id: str = Depends(get_session_id)):
