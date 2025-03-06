@@ -43,14 +43,15 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure CORS - updated to be more permissive for debugging
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for testing
+    allow_origins=["https://smith-frontend.vercel.app"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID", "X-Cancel-Previous"],
     expose_headers=["*"],
+    max_age=86400,
 )
 
 # Add session management
@@ -72,20 +73,6 @@ async def get_session_id(request: Request):
         sessions[session_id]['last_accessed'] = time.time()
     
     return session_id
-
-# Add CORS options endpoint for preflight requests
-@app.options("/{rest_of_path:path}")
-async def options_route(rest_of_path: str):
-    return JSONResponse(
-        content={"message": "OK"},
-        headers={
-            "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Max-Age": "86400",
-        }
-    )
 
 @app.post("/chat")
 async def chat_endpoint(request: Request, session_id: str = Depends(get_session_id)):

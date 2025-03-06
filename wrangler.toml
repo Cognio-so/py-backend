@@ -1,0 +1,29 @@
+name = "cors-worker"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Configure your account ID (replace with your actual account ID)
+account_id = "7a1ee5c85f806b8611bceb0195d44a6c"
+
+# Routes to activate the worker on (you'll need to update these)
+routes = [
+  "https://py-backend.pages.dev/*"
+]
+
+# Specify any environment variables needed by your worker
+[vars]
+ALLOWED_ORIGIN = "https://smith-frontend.vercel.app"
+
+[env.production]
+name = "py-backend"
+workers_dev = true
+
+[[env.production.routes]]
+pattern = "/*"
+script = "api.py"
+
+[build]
+command = ""
+[build.upload]
+format = "service-worker"
