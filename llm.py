@@ -55,7 +55,7 @@ def get_model_instance(model_name):
         return openai_client
     elif model_name == "claude-3-haiku-20240307":
         return claude_client
-    elif model_name == "llama-v3-7b":  # Updated model name
+    elif model_name == "llama-v3-7b":  # Expected model name
         return fireworks
     else:
         raise ValueError(f"Unsupported model: {model_name}")
