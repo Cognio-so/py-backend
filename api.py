@@ -18,9 +18,24 @@ import asyncio
 # Load environment variables
 load_dotenv()
 
-# Verify required API keys are present
-if not os.getenv('GOOGLE_API_KEY') or not os.getenv('OPENAI_API_KEY') or not os.getenv('ANTHROPIC_API_KEY'):
-    raise ValueError("One or more API keys are missing in environment variables!")
+# --- ENVIRONMENT VARIABLE CHECKS ---
+required_env_vars = [
+    'GOOGLE_API_KEY',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'FIREWORKS_API_KEY',
+    'GROQ_API_KEY'  #  Make sure this is set if you use Groq
+]
+
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+
+if missing_vars:
+    raise EnvironmentError(
+        f"Missing required environment variables: {', '.join(missing_vars)}. "
+        "Please ensure these are set in your deployment environment."
+    )
+
+# --- END ENVIRONMENT VARIABLE CHECKS ---
 
 app = FastAPI()
 
