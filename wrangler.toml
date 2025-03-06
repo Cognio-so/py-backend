@@ -1,4 +1,4 @@
-name = "cors-worker"
+name = "py-backend"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
@@ -18,12 +18,18 @@ ALLOWED_ORIGIN = "https://smith-frontend.vercel.app"
 [env.production]
 name = "py-backend"
 workers_dev = true
+vars = { ENVIRONMENT = "production" }
 
 [[env.production.routes]]
-pattern = "/*"
+pattern = "/api/*"
 script = "api.py"
 
 [build]
-command = ""
+command = "pip install -r requirements.txt"
+
+[site]
+bucket = "./"
+pages_build_output_dir = "."
+
 [build.upload]
 format = "service-worker"
