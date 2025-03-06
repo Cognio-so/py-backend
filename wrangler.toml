@@ -1,35 +1,51 @@
 name = "py-backend"
-main = "worker.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Configure your account ID (replace with your actual account ID)
+# Configure your account ID (already set)
 account_id = "7a1ee5c85f806b8611bceb0195d44a6c"
 
-# Routes to activate the worker on (you'll need to update these)
+# Routes - simplified to match your API structure
 routes = [
   "https://py-backend.pages.dev/*"
 ]
 
-# Specify any environment variables needed by your worker
+# Environment variables
 [vars]
 ALLOWED_ORIGIN = "https://smith-frontend.vercel.app"
 
+# Production environment configuration
 [env.production]
 name = "py-backend"
 workers_dev = true
 vars = { ENVIRONMENT = "production" }
 
+# Set up explicit routes for API endpoints
 [[env.production.routes]]
-pattern = "/api/*"
+pattern = "/chat"
 script = "api.py"
 
+[[env.production.routes]]
+pattern = "/agent-chat"
+script = "api.py"
+
+[[env.production.routes]]
+pattern = "/related-questions"
+script = "api.py"
+
+[[env.production.routes]]
+pattern = "/health"
+script = "api.py"
+
+# Build configuration - ensure all dependencies are installed
 [build]
 command = "pip install -r requirements.txt"
 
+# Configure site assets
 [site]
 bucket = "./"
 pages_build_output_dir = "."
 
+# Worker configuration
 [build.upload]
 format = "service-worker"
