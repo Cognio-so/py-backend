@@ -18,24 +18,9 @@ import asyncio
 # Load environment variables
 load_dotenv()
 
-# --- ENVIRONMENT VARIABLE CHECKS ---
-required_env_vars = [
-    'GOOGLE_API_KEY',
-    'OPENAI_API_KEY',
-    'ANTHROPIC_API_KEY',
-    'FIREWORKS_API_KEY',
-    'GROQ_API_KEY'  #  Make sure this is set if you use Groq
-]
-
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-
-if missing_vars:
-    raise EnvironmentError(
-        f"Missing required environment variables: {', '.join(missing_vars)}. "
-        "Please ensure these are set in your deployment environment."
-    )
-
-# --- END ENVIRONMENT VARIABLE CHECKS ---
+# Verify required API keys are present
+if not os.getenv('GOOGLE_API_KEY') or not os.getenv('OPENAI_API_KEY') or not os.getenv('ANTHROPIC_API_KEY'):
+    raise ValueError("One or more API keys are missing in environment variables!")
 
 app = FastAPI()
 
@@ -46,12 +31,10 @@ logger = logging.getLogger(__name__)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://smith-frontend.vercel.app"],
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID", "X-Cancel-Previous"],
-    expose_headers=["*"],
-    max_age=86400,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Add session management
@@ -85,38 +68,127 @@ async def chat_endpoint(request: Request, session_id: str = Depends(get_session_
 
         body = await request.json()
         message = body.get('message', '').strip()
-        model = body.get('model', 'gemini-1.5-flash').strip()  # Use full model ID directly
+        model = body.get('model', 'gemini-1.5-flash').strip()
 
+        # Map model names to their backend versions
+        model_mapping = {
+            'gpt-4o-mini': 'gpt-4o-mini',
+            'gemini-1.5-flash': 'gemini-1.5-flash',
+            'claude-3-haiku-20240307': 'claude-3-haiku-20240307',
+            'llama3-70b-8192': 'llama3-70b-8192',  # Add this line
+        }
+
+        model = model_mapping.get(model, model)  # Get the mapped model, or the original if not found
         request_id = request.headers.get('X-Request-ID')
+
         sessions[session_id]['current_request'] = request_id
         sessions[session_id]['cancelled'] = False
 
         if not message:
             raise HTTPException(status_code=400, detail="No message provided")
 
-        messages = [{"role": "user", "content": message}]
+        # Prepare messages for the model
+        messages = [
+            {"role": "user", "content": message}
+        ]
+
+        # Stream the response
         async def generate():
-            async for text in generate_response(messages, model, session_id):
-                if sessions[session_id].get('cancelled', False):
-                    break
-                yield f"data: {text}\n\n"
-            yield "data: [DONE]\n\n"
+            try:
+                async for text in generate_response(messages, model, session_id):
+                    if sessions[session_id].get('cancelled', False):
+                        break
+                    # Format the response as a proper SSE data chunk
+                    yield f"data: {text}\n\n"
+                yield "data: [DONE]\n\n"
+            except Exception as e:
+                logger.error(f"Error in generate: {str(e)}")
+                yield f"data: Error: {str(e)}\n\n"
 
         return StreamingResponse(
-            generate(), 
-            media_type="text/event-stream",
-            headers={
-                "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
-                "Access-Control-Allow-Credentials": "true",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Content-Type": "text/event-stream",
-                "X-Accel-Buffering": "no"
-            }
+            generate(),
+            media_type="text/event-stream"
         )
+
     except Exception as e:
         logger.error(f"Chat endpoint error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/voice-chat")
+async def voice_chat_endpoint(request: Request, session_id: str = Depends(get_session_id)):
+    try:
+        logger.info(f"Received voice chat request for session {session_id}")
+        
+        # Update session last accessed time
+        sessions[session_id]['last_accessed'] = time.time()
+        
+        body = await request.json()
+        message = body.get('message', '').strip()
+        model = body.get('model', 'gemini-pro').strip()
+        language = body.get('language', 'en-US').strip()
+        request_id = request.headers.get('X-Request-ID')
+
+        logger.info(f"Processing voice request {request_id} with message: {message[:50]}...")
+
+        if not message:
+            logger.warning("Empty message received")
+            return JSONResponse({
+                "success": False,
+                "detail": "No message provided"
+            }, status_code=400)
+
+        # Store the current request ID in the session
+        previous_request = sessions[session_id].get('current_request')
+        sessions[session_id]['current_request'] = request_id
+        logger.info(f"Updated session request ID from {previous_request} to {request_id}")
+
+        # Enhanced system prompt for multilingual support
+        system_prompt = (
+            f"You are a helpful assistant. Respond in {language}. "
+            f"If the user speaks in Hindi, respond in Hindi. "
+            f"If they speak in English, respond in English. "
+            f"Maintain the same language and style as the user's input. "
+            f"Keep responses natural and conversational in the detected language."
+        )
+
+        # Prepare messages for the model
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message}
+        ]
+
+        try:
+            response = ""
+            async for chunk in generate_response(messages, model, session_id):
+                # Check if the request is still valid
+                if sessions[session_id].get('current_request') != request_id:
+                    logger.warning(f"Request {request_id} was superseded")
+                    raise HTTPException(status_code=409, detail="Request superseded")
+                response += chunk
+
+            if not response:
+                raise ValueError("No response generated")
+
+            logger.info(f"Successfully generated response for voice request {request_id}")
+            return JSONResponse({
+                "success": True,
+                "response": response,
+                "language": language
+            })
+
+        except Exception as e:
+            logger.error(f"Model error: {str(e)}")
+            return JSONResponse({
+                "success": False,
+                "detail": f"Model error: {str(e)}"
+            }, status_code=500)
+
+    except Exception as e:
+        logger.error(f"Voice chat error: {str(e)}")
+        return JSONResponse({
+            "success": False,
+            "detail": str(e)
+        }, status_code=500)
 
 @app.post("/agent-chat")
 async def agent_chat_endpoint(request: Request, session_id: str = Depends(get_session_id)):
@@ -126,17 +198,72 @@ async def agent_chat_endpoint(request: Request, session_id: str = Depends(get_se
         
         body = await request.json()
         message = body.get('message', '').strip()
-        model = body.get('model', 'gemini-1.5-flash').strip()
-        request_id = request.headers.get('X-Request-ID')
-
-        sessions[session_id]['current_request'] = request_id
-        sessions[session_id]['cancelled'] = False
         
         if not message:
             raise HTTPException(status_code=400, detail="No message provided")
         
         logger.info(f"Agent chat request from session {session_id}: {message[:50]}...")
         
+        # Format the message for the agent
+        formatted_message = [("user", message)]
+        
+        # Setup agent response streaming
+        async def response_generator():
+            try:
+                # Call the React agent
+                result = await graph.ainvoke(
+                    {"messages": formatted_message},
+                    {"configurable": {"system_prompt": "You are a helpful AI assistant."}}
+                )
+                
+                # Get the final AI message
+                final_message = result["messages"][-1]
+                if hasattr(final_message, "content"):
+                    content = final_message.content
+                    if isinstance(content, str):
+                        yield f"data: {json.dumps({'content': content})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'content': str(content)})}\n\n"
+                
+                yield "data: [DONE]\n\n"
+            except Exception as e:
+                logger.error(f"Agent error: {str(e)}")
+                yield f"data: Error: {str(e)}\n\n"
+                yield "data: [DONE]\n\n"
+        
+        return StreamingResponse(
+            response_generator(),
+            media_type='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Content-Type': 'text/event-stream',
+                'X-Accel-Buffering': 'no'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Agent chat error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        # Cancel previous request if header is present
+        if request.headers.get('X-Cancel-Previous') == 'true':
+            previous_request = sessions[session_id].get('current_request')
+            if previous_request:
+                sessions[session_id]['cancelled'] = True
+
+        body = await request.json()
+        message = body.get('message', '').strip()
+        model = body.get('model', 'gemini-1.5-flash').strip()
+        request_id = request.headers.get('X-Request-ID')
+
+        sessions[session_id]['current_request'] = request_id
+        sessions[session_id]['cancelled'] = False
+
+        if not message:
+            raise HTTPException(status_code=400, detail="No message provided")
+
         # Stream the response from React Agent
         async def generate():
             try:
@@ -207,15 +334,7 @@ async def agent_chat_endpoint(request: Request, session_id: str = Depends(get_se
 
         return StreamingResponse(
             generate(),
-            media_type="text/event-stream",
-            headers={
-                "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
-                "Access-Control-Allow-Credentials": "true",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Content-Type": "text/event-stream",
-                "X-Accel-Buffering": "no"
-            }
+            media_type="text/event-stream"
         )
 
     except Exception as e:
@@ -235,31 +354,14 @@ async def related_questions_endpoint(request: Request):
         # Generate related questions
         questions = await generate_related_questions(message, model)
 
-        return JSONResponse(
-            content={
-                "success": True,
-                "questions": questions
-            },
-            headers={
-                "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
-                "Access-Control-Allow-Credentials": "true",
-            }
-        )
+        return JSONResponse({
+            "success": True,
+            "questions": questions
+        })
 
     except Exception as e:
         logger.error(f"Related questions error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-# Health check endpoint
-@app.get("/health")
-async def health_check():
-    return JSONResponse(
-        content={"status": "healthy"},
-        headers={
-            "Access-Control-Allow-Origin": "https://smith-frontend.vercel.app",
-            "Access-Control-Allow-Credentials": "true",
-        }
-    )
 
 if __name__ == "__main__":
     import uvicorn
