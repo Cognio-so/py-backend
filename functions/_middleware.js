@@ -32,7 +32,6 @@ export async function onRequest(context) {
       });
       
       // Log request information for debugging
-      console.log(`Forwarding ${request.method} request to ${url.pathname}`);
       
       try {
         // Forward the request to your API
