@@ -55,7 +55,7 @@ def get_model_instance(model_name):
         return openai_client
     elif model_name == "claude-3-haiku-20240307":
         return claude_client
-    elif model_name == "llama2-70b-4096":  # Updated to correct Groq model ID
+    elif model_name == "llama-3.3-70b-versatile":  # Updated model ID
         return groq_client
     else:
         raise ValueError(f"Unsupported model: {model_name}")
@@ -118,9 +118,9 @@ async def generate_response(messages, model_name, session_id=None):
             if buffer.strip():
                 yield buffer
 
-        elif model_name == "llama2-70b-4096":  # Updated model ID
+        elif model_name == "llama-3.3-70b-versatile":  # Updated model ID
             response = await model.chat.completions.create(
-                model="llama2-70b-4096",  # Updated to match Groq's production model
+                model="llama-3.3-70b-versatile",  # Updated to correct Groq model
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
                     *[{"role": msg["role"], "content": msg["content"]} for msg in messages]
@@ -189,9 +189,9 @@ async def generate_related_questions(message: str, model_name: str) -> list:
                 max_tokens=1000
             )
             text_response = response.content[0].text
-        elif model_name == "llama2-70b-4096":  # Updated to Groq's free Llama model
+        elif model_name == "llama-3.3-70b-versatile":  # Updated to Groq's free Llama model
             response = groq_sync_client.chat.completions.create(
-                model="llama2-70b-4096",
+                model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}]
             )
             text_response = response.choices[0].message.content
